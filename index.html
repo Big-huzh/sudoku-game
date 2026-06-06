@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>数独游戏</title>
+    <link rel="stylesheet" href="sudoku.css">
+</head>
+<body>
+<div class="game-container" id="gameContainer">
+
+    <div class="paused-overlay" id="pausedOverlay">
+        <span>⏸ 已暂停</span>
+    </div>
+
+    <div class="top-bar">
+        <h1>数独</h1>
+        <div class="top-actions">
+            <div class="timer-wrap">
+                <span class="timer" id="timer">00:00</span>
+                <div class="timer-progress" id="timerProgress"></div>
+            </div>
+            <button class="theme-toggle" id="btnTheme" title="切换主题">🌙</button>
+        </div>
+    </div>
+
+    <div class="difficulty-select">
+        <button class="difficulty-btn" data-d="easy">简单</button>
+        <button class="difficulty-btn active" data-d="medium">中等</button>
+        <button class="difficulty-btn" data-d="hard">困难</button>
+        <button id="btnLevels" class="difficulty-btn">📚 关卡</button>
+    </div>
+
+    <div class="controls">
+        <button class="btn btn-new" id="btnNew">新局</button>
+        <button class="btn btn-hint" id="btnHint">💡 提示</button>
+        <button class="btn btn-check" id="btnCheck">✅ 检查</button>
+        <button id="btnChallenge" class="btn btn-challenge">⏱ 挑战: <span id="challengeStatus">关</span></button>
+        <button class="btn btn-undo" id="btnUndo" disabled>↩ 撤销</button>
+        <button class="btn btn-note" id="btnNote">✎ 笔记</button>
+        <button class="btn btn-stats" id="btnStats">📊</button>
+    </div>
+
+    <div class="board-wrap">
+        <div class="sudoku-board" id="board"></div>
+    </div>
+
+    <div class="number-pad" id="numPad"></div>
+
+    <div class="stats">
+        <div class="stat-item"><div class="stat-label">剩余</div><div class="stat-value" id="remaining">81</div></div>
+        <div class="stat-item"><div class="stat-label">错误</div><div class="stat-value" id="errors">0</div></div>
+        <div class="stat-item"><div class="stat-label">步数</div><div class="stat-value" id="moves">0</div></div>
+    </div>
+
+    <div class="message" id="message"></div>
+</div>
+
+<!-- Stats Modal -->
+<div class="modal-overlay" id="statsModal">
+    <div class="modal-box">
+        <h3>游戏统计</h3>
+        <div id="statsContent" style="text-align:left;margin:16px 0;font-size:14px;color:var(--text-secondary);line-height:2;"></div>
+        <div class="modal-actions">
+            <button class="btn btn-undo" id="statsClose">关闭</button>
+            <button class="btn btn-new" id="statsReset">重置统计</button>
+        </div>
+    </div>
+</div>
+
+<!-- Win Celebration Canvas -->
+<canvas id="celebrateCanvas"></canvas>
+
+<div class="modal-overlay" id="modalOverlay">
+    <div class="modal-box">
+        <h3 id="modalTitle">新游戏</h3>
+        <p id="modalBody">当前游戏进度将丢失，确定要开始新一局吗？</p>
+        <div class="modal-actions">
+            <button class="btn btn-check" id="modalConfirm">确定</button>
+            <button class="btn btn-undo" id="modalCancel">取消</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="diffModal">
+    <div class="modal-box">
+        <h3>切换难度</h3>
+        <p id="diffModalBody">切换难度将重新开始新游戏，确定吗？</p>
+        <div class="modal-actions">
+            <button class="btn btn-check" id="diffConfirm">确定</button>
+            <button class="btn btn-undo" id="diffCancel">取消</button>
+        </div>
+    </div>
+</div>
+
+<div class="level-modal" id="levelModal">
+    <div class="level-modal-content">
+        <h3>选择关卡</h3>
+        <div id="levelList" class="level-list"></div>
+        <button id="btnCloseLevels" class="btn btn-new" style="width:100%;margin-top:10px">关闭</button>
+    </div>
+</div>
+
+<script src="sudoku.js"></script>
+</body>
+</html>
