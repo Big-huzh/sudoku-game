@@ -12,6 +12,8 @@
     let pendingDiff=null;
     let challengeMode=false, challengeMax=0;
     let highestSelectedNum=null; // for note highlighting
+    let celebrating=false; // re-entrancy guard for celebrate()
+    let pendingAction=null; // tracks modal confirmation context
 
     // 静态关卡库（每个难度 3 个不同谜题）
     const LEVELS={
@@ -115,8 +117,10 @@
         return top[Math.floor(Math.random()*top.length)].idx;
     }
 
-    // ===== Canvas 粒子庆祝 =====
+    // ===== Canvas 粒子庆祝 (防重入) =====
     function celebrate(stars){
+        if(celebrating)return;
+        celebrating=true;
         playSound('win');
         const canvas=document.getElementById('celebrateCanvas');
         canvas.style.display='block';
@@ -147,7 +151,7 @@
             }
             frame++;
             if(frame<200&&alive)requestAnimationFrame(animate);
-            else{canvas.style.display='none';ctx.clearRect(0,0,canvas.width,canvas.height)}
+            else{canvas.style.display='none';ctx.clearRect(0,0,canvas.width,canvas.height);celebrating=false}
         }
         requestAnimationFrame(animate);
         // 星级弹出
@@ -224,7 +228,7 @@
         return cls;
     }
 
-    // ===== 渲染 =====
+    // ===== 渲染 (含错误检测和笔记模式指示器) =====
     function render(){
         boardEl.innerHTML='';
         for(let i=0;i<81;i++){
@@ -236,7 +240,11 @@
                 span.className='main-num';span.textContent=board[i];
                 c.appendChild(span);
                 c.classList.add(preset[i]?'preset':'user-input');
+                // 错误检测：数字与解答不符则标红
+                if(board[i]!==solution[i])c.classList.add('error-mark');
             }
+            // 笔记模式指示器（在 render 中统一处理，不会被后续重建覆盖）
+            if(noteMode&&i===selectedIdx&&board[i]===0)c.classList.add('note-mode');
             if(notes[i]&&notes[i].length>0&&board[i]===0){
                 const ne=document.createElement('div');ne.className='notes';
                 for(let n=1;n<=9;n++){
@@ -261,8 +269,8 @@
     function selectCell(idx){
         if(isCompleted||isPaused)return;
         selectedIdx=idx;
-        if(noteMode){getCell(idx).classList.add('note-mode')}
-        updateHighlights();render();
+        // render() 内部已调用 updateHighlights()，无需重复调用
+        render();
     }
 
     function updateHighlights(){
@@ -294,7 +302,9 @@
         }
     }
 
+    // 保存完整笔记快照，确保撤销时能恢复关联格笔记
     function pushHistory(op){
+        op.notesSnapshot=notes.map(n=>n?[...n]:[]);
         history.push(op);
         if(history.length>MAX_HISTORY)history.splice(0,history.length-MAX_HISTORY);
         document.getElementById('btnUndo').disabled=false;
@@ -321,21 +331,19 @@
         const oldNotes=notes[idx]?[...notes[idx]]:[];
         notes[idx]=[];highestSelectedNum=num;
         board[idx]=num;
-        const cell=getCell(idx);
-        cell.innerHTML='<span class="main-num">'+num+'</span>';
-        cell.classList.remove('user-input','error-mark','has-notes','note-mode');
-        cell.classList.add('user-input');
         pushHistory({idx,oldVal:0,oldNotes});
         if(num===solution[idx]){
-            moveCount++;clearRelatedNotes(idx,num);render();
+            moveCount++;clearRelatedNotes(idx,num);
         }else{
-            errorCount++;cell.classList.add('error-mark');moveCount++;
+            errorCount++;moveCount++;
             playSound('error');
+            // 🔧 修复: 不在 fillNumber 末尾调用 hideMessage，让 setTimeout 的 1500ms 生效
             showMessage('数字 '+num+' 不正确','error');setTimeout(hideMessage,1500);
         }
         playSound('fill');selectedIdx=null;
-        recalcRemaining();updateStats();updateHighlights();updateNumPad();
-        hideMessage();autoSave();
+        // 🔧 修复: 统一使用 render() 处理错误标记，移除冗余 DOM 操作
+        render();recalcRemaining();updateStats();updateNumPad();
+        autoSave();
         if(remaining===0&&!hasErrors()){const stars=calcStars(errorCount,timerSeconds,difficulty);win(stars)}
     }
 
@@ -343,9 +351,6 @@
         noteMode=!noteMode;
         document.getElementById('btnNote').classList.toggle('active',noteMode);
         highestSelectedNum=null;
-        if(selectedIdx!==null){
-            getCell(selectedIdx).classList.toggle('note-mode',noteMode);
-        }
         render();playSound('click');
     }
 
@@ -355,10 +360,8 @@
         if(preset[idx]||(board[idx]===0&&(!notes[idx]||notes[idx].length===0)))return;
         pushHistory({idx,oldVal:board[idx],oldNotes:notes[idx]?[...notes[idx]]:[]});
         board[idx]=0;notes[idx]=[];
-        const cell=getCell(idx);
-        cell.innerHTML='';cell.classList.remove('user-input','error-mark','has-notes','note-mode');
         selectedIdx=null;highestSelectedNum=null;
-        recalcRemaining();updateStats();updateHighlights();updateNumPad();
+        render();recalcRemaining();updateStats();updateNumPad();
         hideMessage();autoSave();playSound('click');
     }
 
@@ -366,7 +369,10 @@
         if(history.length===0)return;
         const op=history.pop();
         const idx=op.idx;
-        board[idx]=op.oldVal;notes[idx]=op.oldNotes?[...op.oldNotes]:[];
+        board[idx]=op.oldVal;
+        // 🔧 修复: 恢复完整笔记快照（含被自动清除的关联格笔记）
+        if(op.notesSnapshot){notes=op.notesSnapshot.map(n=>n?[...n]:[])}
+        else{notes[idx]=op.oldNotes?[...op.oldNotes]:[]}
         if(history.length===0)document.getElementById('btnUndo').disabled=true;
         selectedIdx=null;highestSelectedNum=null;
         errorCount=0;for(let i=0;i<81;i++){if(board[i]!==0&&board[i]!==solution[i])errorCount++;}
@@ -449,9 +455,21 @@
             updateTimerDisplay();
         },1000);
     }
+
+    // 🔧 修复: 恢复计时器时正确处理挑战模式（倒数计时）
     function startTimerResume(){
         if(timerInterval)return;
-        timerInterval=setInterval(()=>{timerSeconds++;updateTimerDisplay()},1000);
+        // 挑战模式下计时已归零则直接结束
+        if(challengeMode&&timerSeconds<=0){gameOver();return}
+        timerInterval=setInterval(()=>{
+            if(challengeMode){
+                timerSeconds--;
+                if(timerSeconds<=0){timerSeconds=0;gameOver();return}
+            }else{
+                timerSeconds++;
+            }
+            updateTimerDisplay();
+        },1000);
     }
     function stopTimer(){if(timerInterval){clearInterval(timerInterval);timerInterval=null}}
 
@@ -488,11 +506,19 @@
     function autoSave(){
         try{localStorage.setItem(STORAGE_KEY,JSON.stringify({solution,board,preset,notes,difficulty,errorCount,moveCount,timerSeconds,history,isCompleted,challengeMode,challengeMax}))}catch(e){}
     }
+
+    // 🔧 修复: 增加 schema 校验，防止损坏的 localStorage 数据导致崩溃
     function tryRestore(){
         try{
             const raw=localStorage.getItem(STORAGE_KEY);if(!raw)return false;
-            const data=JSON.parse(raw);if(!data.solution||!data.board)return false;
+            const data=JSON.parse(raw);
+            // Schema 校验
+            if(!data.solution||!Array.isArray(data.solution)||data.solution.length!==81)return false;
+            if(!data.board||!Array.isArray(data.board)||data.board.length!==81)return false;
+            if(!data.solution.every(v=>typeof v==='number'&&v>=0&&v<=9))return false;
+            if(!data.board.every(v=>typeof v==='number'&&v>=0&&v<=9))return false;
             solution=data.solution;board=data.board;preset=data.preset;
+            if(!Array.isArray(preset)||preset.length!==81)return false;
             notes=data.notes||Array.from({length:81},()=>[]);
             while(notes.length<81)notes.push([]);
             difficulty=data.difficulty||'medium';errorCount=data.errorCount||0;
@@ -518,6 +544,7 @@
     }
     function confirmNewGame(){
         if(moveCount===0||isCompleted){newGame();return}
+        pendingAction='newgame';
         document.getElementById('modalTitle').textContent='新游戏';
         document.getElementById('modalBody').textContent='当前游戏进度将丢失，确定要开始新一局吗？';
         document.getElementById('modalOverlay').classList.add('open');
@@ -577,9 +604,20 @@
     document.getElementById('diffConfirm').addEventListener('click',function(){document.getElementById('diffModal').classList.remove('open');if(pendingDiff){difficulty=pendingDiff;pendingDiff=null;newGame()}});
     document.getElementById('diffCancel').addEventListener('click',function(){document.getElementById('diffModal').classList.remove('open');pendingDiff=null});
     document.getElementById('diffModal').addEventListener('click',function(e){if(e.target===this){this.classList.remove('open');pendingDiff=null}});
-    document.getElementById('modalConfirm').addEventListener('click',function(){document.getElementById('modalOverlay').classList.remove('open');newGame()});
-    document.getElementById('modalCancel').addEventListener('click',function(){document.getElementById('modalOverlay').classList.remove('open')});
-    document.getElementById('modalOverlay').addEventListener('click',function(e){if(e.target===this)this.classList.remove('open')});
+
+    // 🔧 修复: 统一确认弹窗处理，支持挑战模式确认
+    document.getElementById('modalConfirm').addEventListener('click',function(){
+        document.getElementById('modalOverlay').classList.remove('open');
+        const action=pendingAction;pendingAction=null;
+        if(action==='challenge'){
+            challengeMode=true;
+            document.getElementById('btnChallenge').classList.add('on');
+            document.getElementById('challengeStatus').textContent='开';
+        }
+        newGame();
+    });
+    document.getElementById('modalCancel').addEventListener('click',function(){document.getElementById('modalOverlay').classList.remove('open');pendingAction=null});
+    document.getElementById('modalOverlay').addEventListener('click',function(e){if(e.target===this){this.classList.remove('open');pendingAction=null}});
     document.getElementById('btnLevels').onclick=()=>{
         const list=document.getElementById('levelList');list.innerHTML='';
         Object.entries(LEVELS).forEach(([id,l])=>{
@@ -590,7 +628,16 @@
         document.getElementById('levelModal').classList.add('open');
     };
     document.getElementById('btnCloseLevels').onclick=()=>document.getElementById('levelModal').classList.remove('open');
+
+    // 🔧 修复: 挑战模式切换增加确认弹窗（与难度切换一致）
     document.getElementById('btnChallenge').onclick=()=>{
+        if(moveCount>0&&!isCompleted&&!challengeMode){
+            pendingAction='challenge';
+            document.getElementById('modalTitle').textContent='挑战模式';
+            document.getElementById('modalBody').textContent='开启挑战模式将重新开始，确定吗？';
+            document.getElementById('modalOverlay').classList.add('open');
+            return;
+        }
         challengeMode=!challengeMode;
         document.getElementById('btnChallenge').classList.toggle('on',challengeMode);
         document.getElementById('challengeStatus').textContent=challengeMode?'开':'关';
